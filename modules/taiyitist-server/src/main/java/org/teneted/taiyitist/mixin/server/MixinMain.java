@@ -16,12 +16,37 @@ import net.minecraft.world.level.storage.LevelResource;
 import net.minecraft.world.level.storage.LevelStorageSource;
 import org.bukkit.configuration.file.YamlConfiguration;
 import org.spongepowered.asm.mixin.Mixin;
+import org.spongepowered.asm.mixin.Unique;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
+import org.spongepowered.asm.mixin.injection.Redirect;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 @Mixin(Main.class)
 public abstract class MixinMain {
+
+    @Unique
+    private static volatile Thread taiyitist$serverShutdownHook;
+
+    @Inject(method = "main", at = @At("HEAD"), remap = false)
+    private static void taiyitist$installConsoleShutdown(String[] args, CallbackInfo ci) {
+        // Register before EULA/settings/world checks, which can return before a server exists.
+        Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+            try {
+                Thread serverHook = taiyitist$serverShutdownHook;
+                if (serverHook != null) {
+                    serverHook.run();
+                }
+            } finally {
+                org.apache.logging.log4j.LogManager.shutdown();
+                try {
+                    net.minecrell.terminalconsole.TerminalConsoleAppender.close();
+                } catch (java.io.IOException ignored) {
+                    // Do not re-enter the logging system after it has shut down.
+                }
+            }
+        }, "Server Shutdown Thread"));
+    }
 
     @Inject(method = "main", at = @At(value = "INVOKE",
             target = "Ljoptsimple/OptionParser;nonOptions()Ljoptsimple/NonOptionArgumentSpec;",
@@ -29,6 +54,8 @@ public abstract class MixinMain {
             remap = false
     )
     private static void taiyitist$initMain(String[] strings, CallbackInfo ci, @Local OptionParser optionParser) {
+        optionParser.accepts("nojline", "Disables interactive console input");
+        optionParser.accepts("noconsole", "Disables console input");
         optionParser.acceptsAll(Arrays.asList("b", "bukkit-settings"), "File for bukkit settings")
                 .withRequiredArg()
                 .ofType(File.class)
@@ -62,6 +89,13 @@ public abstract class MixinMain {
                 .defaultsTo(new File("taiyitist-config","taiyitist.yml"))
                 .describedAs("Yml file");
         // Spigot End
+    }
+
+    @Redirect(method = "main", at = @At(value = "INVOKE",
+            target = "Ljava/lang/Runtime;addShutdownHook(Ljava/lang/Thread;)V"), remap = false)
+    private static void taiyitist$closeConsoleAfterServer(Runtime runtime, Thread vanillaHook) {
+        // The one hook above runs the original server shutdown before flushing/closing output.
+        taiyitist$serverShutdownHook = vanillaHook;
     }
 
     @Inject(method = "main", at = @At(value = "INVOKE",

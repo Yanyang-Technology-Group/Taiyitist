@@ -25,7 +25,7 @@ import org.apache.logging.log4j.io.IoBuilder;
 import org.bukkit.Bukkit;
 import org.bukkit.craftbukkit.Main;
 import org.bukkit.craftbukkit.v1_20_R1.util.ForwardLogHandler;
-import org.bukkit.craftbukkit.v1_20_R1.util.TerminalConsoleWriterThread;
+import net.minecrell.terminalconsole.TerminalConsoleAppender;
 import org.bukkit.event.server.RemoteServerCommandEvent;
 import org.bukkit.event.server.ServerCommandEvent;
 import org.bukkit.plugin.PluginLoadOrder;
@@ -76,27 +76,18 @@ public abstract class MixinDedicatedServer extends MinecraftServer {
         }
         global.addHandler(new ForwardLogHandler());
         final org.apache.logging.log4j.Logger logger = LogManager.getRootLogger();
-        final java.io.OutputStream terminalOutput = System.out;
 
         System.setOut(IoBuilder.forLogger(logger).setLevel(org.apache.logging.log4j.Level.INFO).buildPrintStream());
         System.setErr(IoBuilder.forLogger(logger).setLevel(org.apache.logging.log4j.Level.WARN).buildPrintStream());
 
-        if (Main.useJline && this.bridge$reader() != null) {
-            if (logger instanceof org.apache.logging.log4j.core.Logger coreLogger) {
-                final org.apache.logging.log4j.core.Appender consoleAppender = coreLogger.getAppenders().get("SysOut");
-                if (consoleAppender != null) {
-                    coreLogger.removeAppender(consoleAppender);
-                }
-            }
-
-            TerminalConsoleWriterThread writer = new TerminalConsoleWriterThread(terminalOutput, this.bridge$reader());
-            writer.start();
-        }
         // CraftBukkit end
     }
 
     @Redirect(method = "initServer", at = @At(value = "INVOKE", target = "Ljava/lang/Thread;start()V", ordinal = 0), require = 0)
     private void taiyitist$startConsoleThread(Thread vanillaThread) {
+        if (!Main.useConsole) {
+            return;
+        }
         LineReader consoleReader = this.bridge$reader();
         if (!Main.useJline || consoleReader == null) {
             vanillaThread.start();
@@ -111,21 +102,29 @@ public abstract class MixinDedicatedServer extends MinecraftServer {
                     while (!server.isStopped() && server.isRunning()) {
                         String line = consoleReader.readLine("> ");
                         if (line == null) {
-                            Thread.sleep(50L);
-                            continue;
+                            break;
                         }
-                        if (!line.trim().isEmpty()) {
-                            server.handleConsoleInput(line, server.createCommandSourceStack());
+                        String command = line.trim();
+                        if (command.startsWith("/")) {
+                            command = command.substring(1);
+                        }
+                        if (!command.isEmpty()) {
+                            server.handleConsoleInput(command, server.createCommandSourceStack());
                         }
                     }
-                } catch (InterruptedException interrupted) {
-                    Thread.currentThread().interrupt();
                 } catch (EndOfFileException endOfFile) {
                     // Ctrl-D ends the current input stream; the server itself remains alive.
                 } catch (UserInterruptException interrupt) {
                     server.halt(false);
                 } catch (Exception exception) {
                     TaiyitistMod.LOGGER.error("Exception handling console input", exception);
+                } finally {
+                    TerminalConsoleAppender.setReader(null);
+                    try {
+                        consoleReader.getHistory().save();
+                    } catch (java.io.IOException exception) {
+                        TaiyitistMod.LOGGER.warn("Unable to save console history", exception);
+                    }
                 }
             }
         };

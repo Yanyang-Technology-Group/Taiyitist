@@ -1,12 +1,12 @@
 package org.bukkit.craftbukkit.v1_20_R1.command;
 
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
-import java.util.concurrent.ExecutionException;
 import java.util.logging.Level;
 import org.bukkit.Bukkit;
 import org.bukkit.craftbukkit.v1_20_R1.CraftServer;
-import org.bukkit.craftbukkit.v1_20_R1.util.Waitable;
+import org.bukkit.craftbukkit.v1_20_R1.util.ConsoleCompleter;
 import org.bukkit.event.server.TabCompleteEvent;
 import org.jline.reader.Candidate;
 import org.jline.reader.Completer;
@@ -18,36 +18,27 @@ public class ConsoleCommandCompleter implements Completer {
     @Override
     public void complete(LineReader reader, ParsedLine line, List<Candidate> candidates) {
         CraftServer server = Bukkit.getServer() instanceof CraftServer craftServer ? craftServer : null;
-        if (server == null) {
+        if (server == null || server.getServer().isStopped() || !server.getServer().isRunning()) {
             return;
         }
 
-        final String buffer = line.line();
-        Waitable<List<String>> waitable = new Waitable<List<String>>() {
-            @Override
-            protected List<String> evaluate() {
-                List<String> offers = server.getCommandMap().tabComplete(server.getConsoleSender(), buffer);
+        ConsoleCompleter completer = new ConsoleCompleter(server.getServer().bridge$processQueue(), buffer -> {
+            List<String> offers = server.getCommandMap().tabComplete(server.getConsoleSender(), buffer);
 
-                TabCompleteEvent tabEvent = new TabCompleteEvent(server.getConsoleSender(), buffer, (offers == null) ? Collections.emptyList() : offers);
-                server.getPluginManager().callEvent(tabEvent);
+            // Plugins are allowed to mutate the event's list, including when no command matched.
+            TabCompleteEvent tabEvent = new TabCompleteEvent(server.getConsoleSender(), buffer,
+                    offers == null ? new ArrayList<>() : new ArrayList<>(offers));
+            server.getPluginManager().callEvent(tabEvent);
 
-                return tabEvent.isCancelled() ? Collections.emptyList() : tabEvent.getCompletions();
-            }
-        };
-        server.getServer().bridge$processQueue().add(waitable);
+            return tabEvent.isCancelled() ? Collections.emptyList() : new ArrayList<>(tabEvent.getCompletions());
+        }, 1000);
         try {
-            List<String> offers = waitable.get();
-            if (offers != null) {
-                for (String offer : offers) {
-                    if (offer != null && !offer.isEmpty()) {
-                        candidates.add(new Candidate(offer));
-                    }
-                }
-            }
-        } catch (ExecutionException e) {
-            server.getLogger().log(Level.WARNING, "Unhandled exception when tab completing", e);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
+            completer.complete(reader, line, candidates);
+        } catch (IllegalStateException e) {
+            // JLine holds its redraw lock here. Logging while holding it can deadlock with
+            // another thread printing above the prompt through TerminalConsoleAppender.
+            java.util.concurrent.ForkJoinPool.commonPool().execute(() ->
+                    server.getLogger().log(Level.WARNING, "Unhandled exception when tab completing", e));
         }
     }
 }

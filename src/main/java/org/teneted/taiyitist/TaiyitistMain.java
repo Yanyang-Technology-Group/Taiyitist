@@ -16,6 +16,13 @@ import java.util.stream.Stream;
 public class TaiyitistMain {
 
     public static void main(String[] args) throws Throwable {
+        // Apply input switches before Log4j initializes the shared terminal.
+        for (String arg : args) {
+            if (arg.equals("--nojline") || arg.equals("-nojline")
+                    || arg.equals("--noconsole") || arg.equals("-noconsole")) {
+                System.setProperty("terminal.jline", "false");
+            }
+        }
         System.setProperty("fabric.skipMcProvider", "true");
         System.setProperty("taiyitist.alwaysExtract", "true");
         try {

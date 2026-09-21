@@ -143,6 +143,16 @@ public class Main extends OptionParser {
     }
 
     public static void handleParser(OptionParser parser, OptionSet options) {
+        // Input switches must also work on newer JVMs and diagnostic startup paths.
+        if (options != null) {
+            if (options.has("nojline")) {
+                useJline = false;
+            }
+            if (options.has("noconsole")) {
+                useConsole = false;
+                useJline = false;
+            }
+        }
         if ((options == null) || (options.has("?"))) {
             try {
                 parser.printHelpOn(System.out);
@@ -175,15 +185,6 @@ public class Main extends OptionParser {
             if (isPreRelease && javaVersion == 61.0) {
                 System.err.println("Unsupported Java detected (" + javaVersionName + "). You are running an outdated, pre-release version. Only general availability versions of Java are supported. Please update your Java version.");
                 return;
-            }
-
-            if (options.has("nojline")) {
-                useJline = false;
-            }
-
-            if (options.has("noconsole")) {
-                useConsole = false;
-                useJline = false;
             }
         }
     }

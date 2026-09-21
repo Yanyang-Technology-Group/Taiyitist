@@ -1,25 +1,26 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <Configuration status="warn" shutdownHook="disable">
     <Appenders>
-        <Console name="SysOut" target="SYSTEM_OUT">
-            <PatternLayout pattern="[%d{HH:mm:ss} %level]: %msg%n" />
-        </Console>
+        <!-- One output path for startup, interactive input, redirected output and shutdown. -->
+        <TerminalConsole name="TerminalConsole">
+            <PatternLayout pattern="%consoleText{%highlightError{[%d{HH:mm:ss} %level]: %msg%n%xEx}}" />
+        </TerminalConsole>
         <Queue name="ServerGuiConsole">
-            <PatternLayout pattern="[%d{HH:mm:ss} %level]: %msg%n" />
-        </Queue>
-        <Queue name="TerminalConsole">
-            <PatternLayout pattern="[%d{HH:mm:ss} %level]: %msg%n" />
+            <PatternLayout pattern="%consoleText{[%d{HH:mm:ss} %level]: %msg%n%xEx}{strip}" />
         </Queue>
         <RollingRandomAccessFile name="File" fileName="logs/latest.log" filePattern="logs/%d{yyyy-MM-dd}-%i.log.zip">
-            <PatternLayout pattern="[%d{HH:mm:ss}] [%t/%level] [%logger]: %replace{%msg{nolookups}}{(?i)\u00A7[0-9A-FK-OR]}{}%n" charset="UTF-8"/>
+            <PatternLayout pattern="%consoleText{[%d{HH:mm:ss}] [%t/%level] [%logger]: %msg%n%xEx}{strip}" charset="UTF-8"/>
             <Policies>
                 <TimeBasedTriggeringPolicy/>
                 <OnStartupTriggeringPolicy/>
             </Policies>
             <DefaultRolloverStrategy max="99"/>
         </RollingRandomAccessFile>
+        <Async name="AsyncConsole">
+            <AppenderRef ref="TerminalConsole"/>
+        </Async>
         <RollingRandomAccessFile name="DebugFile" fileName="logs/debug.log" filePattern="logs/debug-%i.log.zip">
-            <PatternLayout pattern="[%d{HH:mm:ss}] [%t/%level] [%logger]: %replace{%msg{nolookups}}{(?i)\u00A7[0-9A-FK-OR]}{}%n" charset="UTF-8"/>
+            <PatternLayout pattern="%consoleText{[%d{HH:mm:ss}] [%t/%level] [%logger]: %msg%n%xEx}{strip}" charset="UTF-8"/>
             <Policies>
                 <OnStartupTriggeringPolicy/>
                 <SizeBasedTriggeringPolicy size="200MB"/>
@@ -32,9 +33,8 @@
             <filters>
                 <MarkerFilter marker="NETWORK_PACKETS" onMatch="DENY" onMismatch="NEUTRAL" />
             </filters>
-            <AppenderRef ref="SysOut" level="info"/>
             <AppenderRef ref="ServerGuiConsole" level="info"/>
-            <AppenderRef ref="TerminalConsole" level="info"/>
+            <AppenderRef ref="AsyncConsole" level="info"/>
             <AppenderRef ref="File" level="INFO"/>
             <AppenderRef ref="DebugFile" level="DEBUG"/>
         </Root>

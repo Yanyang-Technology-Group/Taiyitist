@@ -12,7 +12,6 @@ import com.mojang.datafixers.DataFixer;
 import it.unimi.dsi.fastutil.longs.LongIterator;
 import java.io.File;
 import java.io.IOException;
-import java.lang.management.ManagementFactory;
 import java.net.Proxy;
 import java.util.Arrays;
 import java.util.Collection;
@@ -35,6 +34,7 @@ import net.minecraft.ReportedException;
 import net.minecraft.SystemReport;
 import net.minecraft.Util;
 import net.minecraft.commands.Commands;
+import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Registry;
 import net.minecraft.core.RegistryAccess;
@@ -88,9 +88,9 @@ import org.bukkit.event.world.WorldLoadEvent;
 import org.bukkit.plugin.PluginLoadOrder;
 import org.jetbrains.annotations.Nullable;
 import org.jline.reader.LineReader;
-import org.jline.reader.LineReaderBuilder;
+import net.minecrell.terminalconsole.TerminalConsoleAppender;
+import org.bukkit.craftbukkit.v1_20_R1.util.ConsoleReaderFactory;
 import org.jline.terminal.Terminal;
-import org.jline.terminal.TerminalBuilder;
 import org.objectweb.asm.Opcodes;
 import org.spongepowered.asm.mixin.Final;
 import org.spongepowered.asm.mixin.Mixin;
@@ -214,6 +214,8 @@ public abstract class MixinMinecraftServer extends ReentrantBlockableEventLoop<T
     @Unique
     public LineReader reader;
     @Unique
+    private org.bukkit.craftbukkit.v1_20_R1.util.AsyncConsoleHighlighter taiyitist$consoleHighlighter;
+    @Unique
     private Terminal terminal;
     @TransformAccess(Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC)
     private static int currentTick = 0; // Paper - Further improve tick loop
@@ -245,8 +247,9 @@ public abstract class MixinMinecraftServer extends ReentrantBlockableEventLoop<T
 
     @Inject(method = "<init>", at = @At("RETURN"))
     private void taiyitist$loadOptions(Thread thread, LevelStorageSource.LevelStorageAccess levelStorageAccess, PackRepository packRepository, WorldStem worldStem, Proxy proxy, DataFixer dataFixer, Services services, ChunkProgressListenerFactory chunkProgressListenerFactory, CallbackInfo ci) {
-        String[] arguments = ManagementFactory.getRuntimeMXBean().getInputArguments().toArray(new String[0]);
+        String[] arguments = net.fabricmc.loader.api.FabricLoader.getInstance().getLaunchArguments(false);
         OptionParser parser = new Main();
+        parser.allowsUnrecognizedOptions(); // Vanilla/Fabric also have launch options.
         try {
             options = parser.parse(arguments);
         } catch (Exception ex) {
@@ -260,8 +263,7 @@ public abstract class MixinMinecraftServer extends ReentrantBlockableEventLoop<T
 
     /**
      * Configure the interactive reader before the player list registers the command completer.
-     * JLine must not be disabled just because the JVM has no {@link System#console()} (for
-     * example when launched from a service manager or a terminal multiplexer).
+     * Input and logging must use the same terminal, including in tmux/screen and plain mode.
      */
     @Unique
     private void taiyitist$initConsole() {
@@ -270,20 +272,32 @@ public abstract class MixinMinecraftServer extends ReentrantBlockableEventLoop<T
         }
 
         try {
-            this.terminal = TerminalBuilder.builder()
-                    .name("Taiyitist")
-                    .system(true)
-                    .jansi(true)
-                    .build();
-            this.reader = LineReaderBuilder.builder()
-                    .terminal(this.terminal)
-                    .appName("Taiyitist")
-                    .variable(LineReader.HISTORY_FILE, new File(this.getServerDirectory(), ".console_history").toPath())
-                    .option(LineReader.Option.COMPLETE_IN_WORD, true)
-                    .completer(new org.bukkit.craftbukkit.v1_20_R1.command.ConsoleCommandCompleter())
-                    .build();
-            this.reader.setOpt(LineReader.Option.DISABLE_EVENT_EXPANSION);
+            this.terminal = TerminalConsoleAppender.getTerminal();
+            if (this.terminal == null) {
+                Main.useJline = false;
+                return;
+            }
+            org.jline.reader.Highlighter highlighter = null;
+            if (!"false".equalsIgnoreCase(System.getProperty("taiyitist.console.highlighting"))) {
+                highlighter = this.taiyitist$consoleHighlighter = new org.bukkit.craftbukkit.v1_20_R1.util.AsyncConsoleHighlighter(
+                        new org.bukkit.craftbukkit.v1_20_R1.util.ConsoleHighlighter(buffer -> {
+                            MinecraftServer minecraftServer = (MinecraftServer) (Object) this;
+                            if (minecraftServer.overworld() == null) {
+                                return null;
+                            }
+                            com.mojang.brigadier.StringReader input = new com.mojang.brigadier.StringReader(buffer);
+                            if (input.canRead() && input.peek() == '/') {
+                                input.skip();
+                            }
+                            return minecraftServer.getCommands().getDispatcher().parse(input, minecraftServer.createCommandSourceStack());
+                        }));
+            }
+            this.reader = ConsoleReaderFactory.create(this.terminal,
+                    new File(this.getServerDirectory(), ".console_history").toPath(),
+                    new org.bukkit.craftbukkit.v1_20_R1.command.ConsoleCommandCompleter(), highlighter);
+            TerminalConsoleAppender.setReader(this.reader);
         } catch (Throwable failure) {
+            TerminalConsoleAppender.setReader(null);
             Main.useJline = false;
             this.reader = null;
             this.terminal = null;
@@ -400,12 +414,9 @@ public abstract class MixinMinecraftServer extends ReentrantBlockableEventLoop<T
                     } catch (Exception ignored) {
                     }
                 }
-                if (terminal != null) {
-                    try {
-                        terminal.close();
-                    } catch (Exception ignored) {
-                    }
-                }
+                // Keep the terminal open for late mod/plugin shutdown logs. The shutdown
+                // hook closes it only after Log4j has finished flushing its appenders.
+                TerminalConsoleAppender.setReader(null);
                 // CraftBukkit end
                 this.onServerExit();
             }
@@ -745,6 +756,9 @@ public abstract class MixinMinecraftServer extends ReentrantBlockableEventLoop<T
     @Inject(method = "tickServer", at = @At("RETURN"))
     private void taiyitist$watchdogThreadStart(BooleanSupplier hasTimeLeft, CallbackInfo ci) {
         org.spigotmc.WatchdogThread.tick(); // Spigot
+        if (this.taiyitist$consoleHighlighter != null) {
+            this.taiyitist$consoleHighlighter.update();
+        }
     }
 
     @Inject(method = "tickChildren",
@@ -786,8 +800,9 @@ public abstract class MixinMinecraftServer extends ReentrantBlockableEventLoop<T
     private void taiyitist$checkHeart(BooleanSupplier hasTimeLeft, CallbackInfo ci) {
         // CraftBukkit start
         // Run tasks that are waiting on processing
-        while (!processQueue.isEmpty()) {
-            processQueue.remove().run();
+        Runnable task;
+        while ((task = processQueue.poll()) != null) {
+            task.run();
         }
 
         // Send time updates to everyone, it will get the right time from the world the player is in.
@@ -858,6 +873,12 @@ public abstract class MixinMinecraftServer extends ReentrantBlockableEventLoop<T
         return console;
     }
 
+    @Unique
+    public org.bukkit.command.CommandSender taiyitist$getBukkitSender(CommandSourceStack wrapper) {
+        // A console command source must retain its Bukkit sender during Brigadier permission checks.
+        return console;
+    }
+
     @Override
     public LineReader bridge$reader() {
         return reader;
@@ -882,8 +903,9 @@ public abstract class MixinMinecraftServer extends ReentrantBlockableEventLoop<T
 
     @Override
     public void bridge$drainQueuedTasks() {
-        while (!processQueue.isEmpty()) {
-            processQueue.remove().run();
+        Runnable task;
+        while ((task = processQueue.poll()) != null) {
+            task.run();
         }
     }
 

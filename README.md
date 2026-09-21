@@ -40,6 +40,37 @@ so don't worried about the plugin files will be changed to unsafe
 - Download Taiyitst.
 - Launch with command java -jar taiyitst-launcher-version.jar
 
+### Interactive console
+
+The console uses a shared JLine 3 terminal, following Leaf/Paper's terminal appender approach.
+Logs appear above the command being edited. Warnings/errors and Minecraft plugin colours
+(including RGB) are rendered in the terminal; log files and redirected output remain plain text.
+
+| Input | Action |
+| --- | --- |
+| Tab / repeated Tab | Complete commands and arguments / select among candidates; works on an empty line |
+| Up / Down | Recall command history, saved in `.console_history` |
+| Ctrl+R | Search history |
+| Home / End, Ctrl+A / Ctrl+E | Move to the beginning / end of the line |
+| Ctrl+U / Ctrl+K | Clear text before / after the cursor |
+| Ctrl+L | Redraw the terminal |
+| Ctrl+C | Shut down the server gracefully |
+| Ctrl+D | End console input; keep the server running |
+
+Commands may start with `/`. Completion respects the cursor position, preserves Minecraft
+quoting/backslashes, and stops waiting after one second if the server is busy. Parsed command
+arguments are coloured; unparsed input is red. Mods with unusual parsers can disable this with
+`-Dtaiyitist.console.highlighting=false`.
+
+JVM options go **before** `-jar`: `-Dterminal.ansi=false` disables colours,
+`-Dterminal.ansi=true` enables colours in a compatible hosting panel, and
+`-Dterminal.jline=false` disables line editing. Server options go **after** the JAR:
+`--nojline` selects plain input and `--noconsole` disables input while retaining logs.
+Without a usable terminal the server automatically uses plain input/output.
+
+Run the console regression tests with Java 21:
+`JAVA_HOME=/path/to/jdk-21 ./gradlew :taiyitist-server:test`.
+
 ## Discord
 - https://discord.gg/stTgbjkJ
 
