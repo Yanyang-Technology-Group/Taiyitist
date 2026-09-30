@@ -24,6 +24,7 @@ import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
@@ -33,6 +34,7 @@ import java.util.logging.Logger;
 import javax.annotation.Nullable;
 import net.md_5.bungee.api.chat.BaseComponent;
 import net.md_5.bungee.chat.ComponentSerializer;
+import net.kyori.adventure.text.serializer.gson.GsonComponentSerializer;
 import net.minecraft.advancements.AdvancementProgress;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Holder;
@@ -55,6 +57,7 @@ import net.minecraft.network.protocol.game.ClientboundMapItemDataPacket;
 import net.minecraft.network.protocol.game.ClientboundPlayerInfoRemovePacket;
 import net.minecraft.network.protocol.game.ClientboundPlayerInfoUpdatePacket;
 import net.minecraft.network.protocol.game.ClientboundSectionBlocksUpdatePacket;
+import net.minecraft.network.protocol.game.ClientboundSetActionBarTextPacket;
 import net.minecraft.network.protocol.game.ClientboundSetBorderCenterPacket;
 import net.minecraft.network.protocol.game.ClientboundSetBorderLerpSizePacket;
 import net.minecraft.network.protocol.game.ClientboundSetBorderSizePacket;
@@ -289,6 +292,17 @@ public class CraftPlayer extends CraftHumanEntity implements Player {
         for (String message : messages) {
             sendMessage(sender, message);
         }
+    }
+
+    @Override
+    public void sendActionBar(net.kyori.adventure.text.Component message) {
+        Objects.requireNonNull(message, "message");
+        if (getHandle().connection == null) return;
+
+        // Serialize directly to Minecraft's component format: legacy/Bungee
+        // conversion loses Adventure NBT, selector separators and fallbacks.
+        Component content = Component.Serializer.fromJson(GsonComponentSerializer.gson().serialize(message));
+        getHandle().connection.send(new ClientboundSetActionBarTextPacket(content));
     }
 
     @Override

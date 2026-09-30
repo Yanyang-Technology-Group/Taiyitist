@@ -7,6 +7,9 @@ import java.time.Instant;
 import java.util.Collection;
 import java.util.Date;
 import java.util.Map;
+import java.util.Objects;
+import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.ComponentLike;
 import org.bukkit.BanEntry;
 import org.bukkit.DyeColor;
 import org.bukkit.Effect;
@@ -52,6 +55,23 @@ import org.jetbrains.annotations.Nullable;
  * Represents a player, connected or not
  */
 public interface Player extends HumanEntity, Conversable, OfflinePlayer, PluginMessageRecipient {
+
+    /**
+     * Sends an Adventure component to the action bar above the hotbar.
+     * An empty component clears the action bar.
+     *
+     * @param message the message to display
+     */
+    void sendActionBar(@NotNull Component message);
+
+    /**
+     * Sends an Adventure component-like message to the action bar.
+     *
+     * @param message the message to display
+     */
+    default void sendActionBar(@NotNull ComponentLike message) {
+        sendActionBar(Objects.requireNonNull(message, "message").asComponent());
+    }
 
     /**
      * {@inheritDoc}
